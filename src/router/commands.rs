@@ -1,4 +1,4 @@
-use crate::moodle::{Moodle, MoodleError};
+use crate::moodle::Moodle;
 use crate::router::{MyDialogue, State};
 use crate::MyBot;
 use anyhow::Result;
@@ -51,7 +51,7 @@ pub async fn receive_cookie(
 
             // TODO: check with regex and warn/error if it doesn't look like a session cookie
             match moodle.make_user(session).await {
-                Ok(user) => {
+                Ok(Some(user)) => {
                     let user_str = format!("{}", user);
 
                     dialogue.update(State::Registered(user)).await?;
@@ -66,7 +66,7 @@ pub async fn receive_cookie(
                     )
                     .await?;
                 }
-                Err(MoodleError::SessionInvalid) => {
+                Ok(None) => {
                     bot.edit_message_text(message.chat.id, message.id, "Invalid session cookie")
                         .await?;
                 }
