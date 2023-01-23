@@ -6,7 +6,7 @@ mod router;
 mod storage;
 mod time_trace;
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use dptree::deps;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +24,7 @@ use router::{schema, MyStorage};
 type MyBot = Trace<Throttle<DefaultParseMode<Bot>>>;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     info!("Starting historia bot...");
 

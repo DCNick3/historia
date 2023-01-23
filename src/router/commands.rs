@@ -28,11 +28,14 @@ pub async fn start(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result
 
     Ok(())
 }
-pub async fn cancel(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result<()> {
-    info!("Received cancel command from {:?}", message.chat);
-    bot.send_message(message.chat.id, "Cancelling the dialogue.")
-        .await?;
-    dialogue.exit().await?;
+pub async fn reset(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result<()> {
+    info!("Received reset command from {:?}", message.chat);
+    bot.send_message(
+        message.chat.id,
+        "Resetting the bot, you are no longer registered",
+    )
+    .await?;
+    dialogue.update(State::Start).await?;
     Ok(())
 }
 
@@ -60,29 +63,33 @@ pub async fn receive_cookie(
                         message.chat.id,
                         message.id,
                         format!(
-                            "Hello, {}!\nYou are registered now",
+                            "Hello, {}!\nYou are registered now. When the attendance password will be published, I will put a mark for you",
                             bold(&escape(&user_str))
                         ),
                     )
                     .await?;
                 }
                 Ok(None) => {
-                    bot.edit_message_text(message.chat.id, message.id, "Invalid session cookie")
-                        .await?;
+                    bot.edit_message_text(
+                        message.chat.id,
+                        message.id,
+                        "Invalid session cookie, try again",
+                    )
+                    .await?;
                 }
                 Err(e) => {
                     warn!("Failed to make user: {:?}", e);
                     bot.edit_message_text(
                         message.chat.id,
                         message.id,
-                        "Failed to contact moodle. Contact the bot owner",
+                        "Failed to contact moodle. You can try again or contact the bot admin",
                     )
                     .await?;
                 }
             }
         }
         None => {
-            bot.send_message(message.chat.id, "I need a cookie!")
+            bot.send_message(message.chat.id, "I need a text message, not this!")
                 .await?;
         }
     }
@@ -90,10 +97,9 @@ pub async fn receive_cookie(
     Ok(())
 }
 pub async fn invalid_state(bot: MyBot, message: Message) -> Result<()> {
-    warn!("Invalid state!11");
     bot.send_message(
         message.chat.id,
-        "Unable to handle the message. Type /help to see the usage.",
+        "Unable to handle the message. Type /help to see the usage.\n\nMaybe you want to /start?",
     )
     .await?;
     Ok(())

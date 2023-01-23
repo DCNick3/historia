@@ -11,7 +11,7 @@ use crate::moodle::MoodleUser;
 use crate::router::commands::{invalid_state, receive_cookie};
 use crate::storage::SqliteStorage;
 use channel_post::channel_post;
-use commands::{cancel, help, start};
+use commands::{help, reset, start};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub enum State {
@@ -34,8 +34,8 @@ pub enum Command {
     Help,
     #[command(description = "start the registration procedure.")]
     Start,
-    #[command(description = "cancel the registration procedure.")]
-    Cancel,
+    #[command(description = "reset the bot, removing your registration.")]
+    Reset,
 }
 
 pub fn schema() -> UpdateHandler<anyhow::Error> {
@@ -44,7 +44,7 @@ pub fn schema() -> UpdateHandler<anyhow::Error> {
     let command_handler = teloxide::filter_command::<Command, _>()
         .branch(case![Command::Help].endpoint(help))
         .branch(case![Command::Start].endpoint(start))
-        .branch(case![Command::Cancel].endpoint(cancel));
+        .branch(case![Command::Reset].endpoint(reset));
 
     let message_handler = Update::filter_message()
         .filter(|m: Message| m.chat.id.is_user())

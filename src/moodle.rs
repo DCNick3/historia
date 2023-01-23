@@ -14,7 +14,7 @@ use reqwest::header::{HeaderValue, COOKIE, LOCATION};
 use reqwest::redirect::Policy;
 use reqwest::Url;
 use reqwest_tracing::TracingMiddleware;
-use scraper::{ElementRef, Html, Node, Selector};
+use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::num::NonZeroU32;
@@ -55,15 +55,21 @@ struct AjaxPayload<T> {
 }
 
 #[derive(Debug)]
-enum SessionProbeResult {
+pub enum SessionProbeResult {
     Invalid,
     Valid { email: String, csrf_session: String },
 }
 
 #[derive(Debug)]
-struct AttendanceSession {
-    id: u32,
-    date: NaiveDate,
+pub struct AttendanceSession {
+    pub id: u32,
+    pub date: NaiveDate,
+}
+
+impl AttendanceSession {
+    pub fn matches(&self, attendance: &Attendance) -> bool {
+        self.date.day() == attendance.day as u32 && self.date.month() == attendance.month as u32
+    }
 }
 
 impl Moodle {
@@ -102,8 +108,8 @@ impl Moodle {
         Ok(email.map(|email| MoodleUser { session, email }))
     }
 
-    #[instrument(skip_all)]
-    async fn check_session(&self, moodle_session: &str) -> Result<SessionProbeResult> {
+    #[instrument(skip_all, fields(user = %user.email))]
+    pub async fn check_user(&self, user: &MoodleUser) -> Result<SessionProbeResult> {
         self.rate_limiter.until_ready().await;
 
         let url = self.base_url.join("/user/profile.php")?;
@@ -113,7 +119,7 @@ impl Moodle {
             .get(url)
             .header(
                 COOKIE,
-                HeaderValue::from_str(&format!("MoodleSession={}", moodle_session))?,
+                HeaderValue::from_str(&format!("MoodleSession={}", user.session))?,
             )
             .send()
             .await?;
@@ -162,32 +168,22 @@ impl Moodle {
         })
     }
 
-    #[instrument(skip_all, fields(user = %user.email))]
-    pub async fn check_user(&self, user: &MoodleUser) -> Result<bool> {
-        Ok(match self.check_session(&user.session).await? {
-            SessionProbeResult::Valid { .. } => true,
-            SessionProbeResult::Invalid => false,
-        })
-    }
-
-    #[instrument(skip_all, fields(%attendance_id))]
-    async fn get_attendance_sessions(
+    #[instrument(skip_all, fields(%activity_id, user = %user.email))]
+    pub async fn get_attendance_sessions(
         &self,
-        moodle_session: &str,
-        attendance_id: u32,
+        activity_id: u32,
+        user: &MoodleUser,
     ) -> Result<Vec<AttendanceSession>> {
         self.rate_limiter.until_ready().await;
 
-        let url = self
-            .base_url
-            .join(&format!("/mod/attendance/view.php?id={attendance_id}"))?;
+        let url = self.make_attendance_url(activity_id)?;
 
         let resp = self
             .reqwest
             .get(url)
             .header(
                 COOKIE,
-                HeaderValue::from_str(&format!("MoodleSession={}", moodle_session))?,
+                HeaderValue::from_str(&format!("MoodleSession={}", user.session))?,
             )
             .send()
             .await?
@@ -222,16 +218,13 @@ impl Moodle {
             let date = session
                 .select(&DATE_SELECTOR)
                 .next()
-                .context("Could not find date")?
-                .first_child()
-                .map(|v| match v.value() {
-                    Node::Text(t) => Ok(t),
-                    _ => bail!("Date is not a text node"),
-                })
-                .context("Could not find date text")?
-                .context("Could not find date text")?
-                .trim()
-                .to_string();
+                .ok_or_else(|| anyhow!("Could not find date in session node"))
+                .and_then(|v| {
+                    v.text()
+                        .next()
+                        .ok_or_else(|| anyhow!("Could not find date in session node"))
+                })?
+                .trim();
             let date = DATE_FORMATS
                 .into_iter()
                 .map(|fmt| NaiveDate::parse_from_str(&date, fmt).context("Parsing date"))
@@ -264,10 +257,10 @@ impl Moodle {
         Ok(result)
     }
 
-    #[instrument(skip_all, fields(%session_id, %password))]
-    async fn submit_attendance_session(
+    #[instrument(skip_all, fields(%session_id, %password, user = %user.email))]
+    pub async fn mark_attendance_session(
         &self,
-        moodle_session: &str,
+        user: &MoodleUser,
         csrf_session: &str,
         session_id: u32,
         password: &str,
@@ -293,7 +286,7 @@ impl Moodle {
             .post(url)
             .header(
                 COOKIE,
-                HeaderValue::from_str(&format!("MoodleSession={}", moodle_session))?,
+                HeaderValue::from_str(&format!("MoodleSession={}", user.session))?,
             )
             .form(&Body {
                 sesskey: csrf_session,
@@ -332,49 +325,20 @@ impl Moodle {
         }
     }
 
-    #[instrument(skip_all, fields(%activity_id, user = %user.email, %attendance))]
-    pub async fn mark_attendance(
-        &self,
-        activity_id: u32,
-        user: &MoodleUser,
-        attendance: &Attendance,
-    ) -> Result<()> {
-        let (email, csrf) = match self.check_session(&user.session).await? {
-            SessionProbeResult::Valid {
-                email,
-                csrf_session,
-            } => (email, csrf_session),
-            SessionProbeResult::Invalid => bail!("Invalid session"),
-        };
+    pub fn make_attendance_url(&self, activity_id: u32) -> Result<Url> {
+        Ok(self
+            .base_url
+            .join(&format!("/mod/attendance/view.php?id={}", activity_id))
+            .context("Making attendance URL")?)
+    }
 
-        info!("Marking attendance for {}...", email);
-
-        let sessions = self
-            .get_attendance_sessions(&user.session, activity_id)
-            .await?
-            .into_iter()
-            .filter(|s| {
-                s.date.day() == attendance.day as u32 && s.date.month() == attendance.month as u32
-            })
-            .collect::<Vec<_>>();
-
-        if sessions.is_empty() {
-            bail!("Could not find session for the given date");
-        }
-
-        info!("Matching sessions: {:?}", sessions);
-
-        for session in sessions {
-            self.submit_attendance_session(&user.session, &csrf, session.id, &attendance.password)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Submitting attendance session {} with password {}",
-                        session.id, attendance.password
-                    )
-                })?;
-        }
-
-        Ok(())
+    pub fn make_session_url(&self, session_id: u32) -> Result<Url> {
+        Ok(self
+            .base_url
+            .join(&format!(
+                "/mod/attendance/attendance.php?sessid={}",
+                session_id
+            ))
+            .context("Making session URL")?)
     }
 }
