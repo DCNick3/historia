@@ -23,7 +23,9 @@ type MyBot = Trace<Throttle<DefaultParseMode<Bot>>>;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    info!("Starting throw dice bot...");
+    info!("Starting historia bot...");
+
+    let config = config::Config::read()?;
 
     let bot: MyBot = Bot::from_env()
         .parse_mode(ParseMode::Html)
@@ -36,18 +38,18 @@ async fn main() -> anyhow::Result<()> {
         .await
         .build();
 
-    let config = Arc::new(config::Config {
-        update_chat_list: vec![ChatId(-1001842503691), ChatId(-1001727873081)],
-    });
-
-    let storage = MyStorage::open("storage.db", Json)
+    let storage = MyStorage::open(&config.database, Json)
         .await
         .context("Opening storage")?;
 
-    let moodle = Arc::new(Moodle::new().await.context("Opening moodle accessor")?);
+    let moodle = Arc::new(
+        Moodle::new(&config.moodle)
+            .await
+            .context("Opening moodle accessor")?,
+    );
 
     Dispatcher::builder(bot, schema())
-        .dependencies(deps![config, storage, moodle])
+        .dependencies(deps![Arc::new(config.bot), storage, moodle])
         .enable_ctrlc_handler()
         .build()
         .dispatch_with_listener(

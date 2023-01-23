@@ -1,4 +1,5 @@
 use crate::attendance::Attendance;
+use crate::config;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
@@ -17,7 +18,7 @@ impl Display for MoodleUser {
 pub struct Moodle {}
 
 impl Moodle {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub async fn new(_config: &config::Moodle) -> anyhow::Result<Self> {
         Ok(Moodle {})
     }
 

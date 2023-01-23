@@ -1,8 +1,7 @@
 use crate::attendance::Attendance;
-use crate::config::Config;
 use crate::moodle::Moodle;
 use crate::router::{MyStorage, State};
-use crate::MyBot;
+use crate::{config, MyBot};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -86,7 +85,7 @@ async fn handle_user(
 
 pub async fn channel_post(
     bot: MyBot,
-    config: Arc<Config>,
+    config: Arc<config::Bot>,
     moodle: Arc<Moodle>,
     post: Message,
     storage: Arc<MyStorage>,

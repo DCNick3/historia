@@ -1,0 +1,14 @@
+database:
+  path: "storage.db"
+moodle:
+  base_url: "https://moodle.innopolis.university/"
+  rpm: 120
+  max_burst: 120
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
+  activity_id: 123
+updater:
+  interval: "1h"
+bot:
+  update_chat_list:
+    - -1001842503691 # history passwords
+    - -1001727873081 # history test

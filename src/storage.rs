@@ -1,3 +1,4 @@
+use crate::config;
 use futures::future::BoxFuture;
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{sqlite::SqlitePool, Executor};
@@ -5,7 +6,6 @@ use std::collections::HashMap;
 use std::{
     convert::Infallible,
     fmt::{Debug, Display},
-    str,
     sync::Arc,
 };
 use teloxide::dispatching::dialogue::{Serializer, Storage};
@@ -38,10 +38,10 @@ where
 
 impl<S> SqliteStorage<S> {
     pub async fn open(
-        path: &str,
+        config: &config::Database,
         serializer: S,
     ) -> Result<Arc<Self>, SqliteStorageError<Infallible>> {
-        let pool = SqlitePool::connect(format!("sqlite:{path}?mode=rwc").as_str()).await?;
+        let pool = SqlitePool::connect(format!("sqlite:{}?mode=rwc", config.path).as_str()).await?;
         let mut conn = pool.acquire().await?;
         sqlx::query(
             r#"
