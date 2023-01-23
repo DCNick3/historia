@@ -1,4 +1,4 @@
-use crate::moodle::Moodle;
+use crate::moodle::{Moodle, MoodleError};
 use crate::router::{MyDialogue, State};
 use crate::MyBot;
 use anyhow::Result;
@@ -45,24 +45,37 @@ pub async fn receive_cookie(
     info!("Received cookie from {:?}", message.chat);
     match message.text().map(ToOwned::to_owned) {
         Some(session) => {
+            let message = bot
+                .send_message(message.chat.id, "Checking session...")
+                .await?;
+
             // TODO: check with regex and warn/error if it doesn't look like a session cookie
             match moodle.make_user(session).await {
                 Ok(user) => {
-                    bot.send_message(
+                    let user_str = format!("{}", user);
+
+                    dialogue.update(State::Registered(user)).await?;
+
+                    bot.edit_message_text(
                         message.chat.id,
+                        message.id,
                         format!(
-                            "Hello, {}!\nYou are registered now.",
-                            bold(&escape(&format!("{}", user)))
+                            "Hello, {}!\nYou are registered now",
+                            bold(&escape(&user_str))
                         ),
                     )
                     .await?;
-                    dialogue.update(State::Registered(user)).await?;
+                }
+                Err(MoodleError::SessionInvalid) => {
+                    bot.edit_message_text(message.chat.id, message.id, "Invalid session cookie")
+                        .await?;
                 }
                 Err(e) => {
                     warn!("Failed to make user: {:?}", e);
-                    bot.send_message(
+                    bot.edit_message_text(
                         message.chat.id,
-                        "Failed to talk to moodle. Invalid session?",
+                        message.id,
+                        "Failed to contact moodle. Contact the bot owner",
                     )
                     .await?;
                 }

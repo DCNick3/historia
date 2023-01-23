@@ -1,8 +1,10 @@
 mod attendance;
 mod config;
 mod moodle;
+mod moodle_extender;
 mod router;
 mod storage;
+mod time_trace;
 
 use anyhow::Context;
 use dptree::deps;
@@ -16,6 +18,7 @@ use teloxide::update_listeners::Polling;
 use tracing::info;
 
 use crate::moodle::Moodle;
+use crate::moodle_extender::MoodleExtender;
 use router::{schema, MyStorage};
 
 type MyBot = Trace<Throttle<DefaultParseMode<Bot>>>;
@@ -42,8 +45,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Opening storage")?;
 
+    let moodle_extender = MoodleExtender::new(&config.moodle_extender).await?;
+
     let moodle = Arc::new(
-        Moodle::new(&config.moodle)
+        Moodle::new(&config.moodle, moodle_extender)
             .await
             .context("Opening moodle accessor")?,
     );

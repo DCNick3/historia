@@ -26,6 +26,7 @@ where
 pub struct Config {
     pub database: Database,
     pub moodle: Moodle,
+    pub moodle_extender: MoodleExtender,
     pub updater: Updater,
     pub bot: Bot,
 }
@@ -55,6 +56,12 @@ pub struct Moodle {
     pub max_burst: u32,
     pub user_agent: String,
     pub activity_id: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MoodleExtender {
+    #[serde(deserialize_with = "deserialize_url")]
+    pub base_url: Url,
 }
 
 #[derive(Debug, Deserialize)]
