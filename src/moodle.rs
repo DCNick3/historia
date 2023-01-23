@@ -3,6 +3,7 @@ use crate::config;
 use crate::moodle_extender::MoodleExtender;
 use crate::time_trace::TimeTrace;
 use anyhow::{anyhow, bail, Context, Result};
+use chrono::{Datelike, NaiveDate};
 use email_address::EmailAddress;
 use governor::clock::DefaultClock;
 use governor::state::{InMemoryState, NotKeyed};
@@ -13,14 +14,17 @@ use reqwest::header::{HeaderValue, COOKIE, LOCATION};
 use reqwest::redirect::Policy;
 use reqwest::Url;
 use reqwest_tracing::TracingMiddleware;
+use scraper::{ElementRef, Html, Node, Selector};
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use tracing::{info, instrument};
+use tracing::{debug, info, instrument};
 
-static EMAIL_EXTRACT_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"<dt>Email address</dt><dd><a href="([^"]+)">"#).unwrap());
+static EMAIL_EXTRACT_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r#"<dt>(?:Email address|Адрес электронной почты)</dt><dd><a href="([^"]+)">"#)
+        .unwrap()
+});
 static SESSION_EXTRACT_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#""sesskey":"([^"]+)""#).unwrap());
 
@@ -51,31 +55,15 @@ struct AjaxPayload<T> {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
-struct AjaxError {
-    pub text: String,
-    pub code: String,
-}
-
-impl Display for AjaxError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl std::error::Error for AjaxError {}
-
-#[derive(Debug)]
-enum AjaxResult<T: Deserialize<'static>> {
-    Ok(T),
-    SessionDead,
-    Error(AjaxError),
-}
-
-#[derive(Debug)]
 enum SessionProbeResult {
     Invalid,
     Valid { email: String, csrf_session: String },
+}
+
+#[derive(Debug)]
+struct AttendanceSession {
+    id: u32,
+    date: NaiveDate,
 }
 
 impl Moodle {
@@ -103,6 +91,7 @@ impl Moodle {
         })
     }
 
+    #[instrument(skip_all)]
     pub async fn make_user(&self, session: String) -> Result<Option<MoodleUser>> {
         let email = self
             .extender
@@ -173,19 +162,131 @@ impl Moodle {
         })
     }
 
-    #[instrument(skip_all, fields(name = format!("ajax {}", method_name)))]
-    async fn ajax<T: Serialize, R: for<'de> Deserialize<'de>>(
+    #[instrument(skip_all, fields(user = %user.email))]
+    pub async fn check_user(&self, user: &MoodleUser) -> Result<bool> {
+        Ok(match self.check_session(&user.session).await? {
+            SessionProbeResult::Valid { .. } => true,
+            SessionProbeResult::Invalid => false,
+        })
+    }
+
+    #[instrument(skip_all, fields(%attendance_id))]
+    async fn get_attendance_sessions(
         &self,
         moodle_session: &str,
-        csrf_session: &str,
-        method_name: &str,
-        args: T,
-    ) -> Result<AjaxResult<R>> {
+        attendance_id: u32,
+    ) -> Result<Vec<AttendanceSession>> {
         self.rate_limiter.until_ready().await;
 
         let url = self
             .base_url
-            .join(&format!("/lib/ajax/service.php?sesskey={}", csrf_session))?;
+            .join(&format!("/mod/attendance/view.php?id={attendance_id}"))?;
+
+        let resp = self
+            .reqwest
+            .get(url)
+            .header(
+                COOKIE,
+                HeaderValue::from_str(&format!("MoodleSession={}", moodle_session))?,
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+
+        static TABLE_SELECTOR: Lazy<Selector> = Lazy::new(|| {
+            Selector::parse("table.generaltable.attwidth.boxaligncenter > tbody").unwrap()
+        });
+        static DATE_SELECTOR: Lazy<Selector> =
+            Lazy::new(|| Selector::parse("td:nth-of-type(1)").unwrap());
+        static LINK_SELECTOR: Lazy<Selector> =
+            Lazy::new(|| Selector::parse("td:nth-of-type(3) > a").unwrap());
+        static DATE_FORMATS: [&str; 2] = [
+            // 23.01.23 (Mon)
+            "%d.%m.%y (%a)",
+            // Mon 23 Jan 2023
+            "%a %d %b %Y",
+        ];
+
+        let resp = Html::parse_document(&resp.text().await?);
+        let table = resp
+            .select(&TABLE_SELECTOR)
+            .next()
+            .context("Could not find attendance table")?;
+
+        let mut result = Vec::new();
+        for session in table.children() {
+            debug!("Session node: {:?}", session.value());
+
+            // skip non-element nodes
+            let Some(session) = ElementRef::wrap(session) else { continue };
+            let date = session
+                .select(&DATE_SELECTOR)
+                .next()
+                .context("Could not find date")?
+                .first_child()
+                .map(|v| match v.value() {
+                    Node::Text(t) => Ok(t),
+                    _ => bail!("Date is not a text node"),
+                })
+                .context("Could not find date text")?
+                .context("Could not find date text")?
+                .trim()
+                .to_string();
+            let date = DATE_FORMATS
+                .into_iter()
+                .map(|fmt| NaiveDate::parse_from_str(&date, fmt).context("Parsing date"))
+                .fold(Err(anyhow!("")), |acc, res| acc.or(res))?;
+
+            let Some(link) = session
+                .select(&LINK_SELECTOR)
+                .next()
+            else {
+                debug!("Skipping session node, as it's missing a link. Probably a closed session or smth");
+                continue
+            };
+
+            let link = link
+                .value()
+                .attr("href")
+                .context("Could not find link href")?;
+            let link = Url::parse(link).context("Could not parse link")?;
+            let id = link
+                .query_pairs()
+                .find(|(k, _)| k == "sessid")
+                .map(|(_, v)| v)
+                .context("Could not find sessid in link")?
+                .parse::<u32>()
+                .context("Parsing id")?;
+
+            result.push(AttendanceSession { id, date });
+        }
+
+        Ok(result)
+    }
+
+    #[instrument(skip_all, fields(%session_id, %password))]
+    async fn submit_attendance_session(
+        &self,
+        moodle_session: &str,
+        csrf_session: &str,
+        session_id: u32,
+        password: &str,
+    ) -> Result<()> {
+        self.rate_limiter.until_ready().await;
+
+        let url = self.base_url.join("/mod/attendance/attendance.php")?;
+
+        #[derive(Serialize)]
+        #[allow(non_snake_case)]
+        struct Body<'a> {
+            sesskey: &'a str,
+            sessid: u32,
+            _qf__mod_attendance_form_studentattendance: i32,
+            mform_isexpanded_id_session: i32,
+            studentpassword: &'a str,
+            submitbutton: &'a str,
+            status: u32,
+        }
 
         let resp = self
             .reqwest
@@ -194,73 +295,50 @@ impl Moodle {
                 COOKIE,
                 HeaderValue::from_str(&format!("MoodleSession={}", moodle_session))?,
             )
-            .json(&[AjaxPayload::<T> {
-                index: 0,
-                methodname: method_name.to_string(),
-                args,
-            }])
+            .form(&Body {
+                sesskey: csrf_session,
+                sessid: session_id,
+                _qf__mod_attendance_form_studentattendance: 1,
+                mform_isexpanded_id_session: 1,
+                studentpassword: password,
+                submitbutton: "Save changes",
+                status: 1371, // magic number
+            })
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
-        let resp = resp.text().await.context("Reading body as string")?;
-
-        let resp: [serde_json::Map<String, serde_json::Value>; 1] =
-            serde_json::from_str(&resp).context("Parsing body as untyped JSON")?;
-        let [resp] = resp;
-        let error = resp
-            .get("error")
-            .ok_or_else(|| anyhow!("Missing \"error\" field in response"))?;
-        if let Some(err) = error.as_str() {
-            let errcode = resp
-                .get("errorcode")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("Missing \"errorcode\" field in response or wrong type"))?;
-            return Ok(AjaxResult::Error(AjaxError {
-                text: err.to_string(),
-                code: errcode.to_string(),
-            }));
-        } else if let Some(true) = error.as_bool() {
-            let exception = resp
-                .get("exception")
-                .and_then(|v| v.as_object())
-                .ok_or_else(|| anyhow!("Missing \"exception\" field in response or wrong type"))?;
-            let message = exception
-                .get("message")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("Missing \"message\" field in exception or wrong type"))?;
-            let errorcode = exception
-                .get("errorcode")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow!("Missing \"errorcode\" field in exception or wrong type"))?;
-
-            if errorcode == "servicerequireslogin" {
-                return Ok(AjaxResult::SessionDead);
-            }
-
-            return Ok(AjaxResult::Error(AjaxError {
-                text: message.to_string(),
-                code: errorcode.to_string(),
-            }));
+        if !resp.status().is_redirection() {
+            bail!(
+                "Unexpected response status: {} (expected a redirect). Invalid status?",
+                resp.status()
+            );
         }
 
-        let data = resp
-            .get("data")
-            .ok_or_else(|| anyhow!("Missing \"data\" field in response"))?;
+        let location = resp
+            .headers()
+            .get(LOCATION)
+            .ok_or_else(|| anyhow!("Missing header"))
+            .and_then(|v| v.to_str().context("Header to str"))
+            .and_then(|v| Url::parse(v).context("Parse as Url"))?;
 
-        Ok(AjaxResult::Ok(
-            serde_json::from_value(data.clone())
-                .context("Parsing response \"data\" field as typed result")?,
-        ))
+        match location.path() {
+            "/mod/attendance/view.php" => Ok(()),
+            "/mod/attendance/attendance.php" => {
+                // TODO: try to follow and extract the error
+                bail!("Moodle redirected to the same page, probably some error occurred")
+            }
+            path => bail!("Unknown redirect path: {}", path),
+        }
     }
 
-    pub async fn check_user(&self, user: &MoodleUser) -> Result<bool> {
-        Ok(match self.check_session(&user.session).await? {
-            SessionProbeResult::Valid { .. } => true,
-            SessionProbeResult::Invalid => false,
-        })
-    }
-
-    pub async fn mark_attendance(&self, user: &MoodleUser, attendance: &Attendance) -> Result<()> {
+    #[instrument(skip_all, fields(%activity_id, user = %user.email, %attendance))]
+    pub async fn mark_attendance(
+        &self,
+        activity_id: u32,
+        user: &MoodleUser,
+        attendance: &Attendance,
+    ) -> Result<()> {
         let (email, csrf) = match self.check_session(&user.session).await? {
             SessionProbeResult::Valid {
                 email,
@@ -270,6 +348,32 @@ impl Moodle {
         };
 
         info!("Marking attendance for {}...", email);
+
+        let sessions = self
+            .get_attendance_sessions(&user.session, activity_id)
+            .await?
+            .into_iter()
+            .filter(|s| {
+                s.date.day() == attendance.day as u32 && s.date.month() == attendance.month as u32
+            })
+            .collect::<Vec<_>>();
+
+        if sessions.is_empty() {
+            bail!("Could not find session for the given date");
+        }
+
+        info!("Matching sessions: {:?}", sessions);
+
+        for session in sessions {
+            self.submit_attendance_session(&user.session, &csrf, session.id, &attendance.password)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Submitting attendance session {} with password {}",
+                        session.id, attendance.password
+                    )
+                })?;
+        }
 
         Ok(())
     }

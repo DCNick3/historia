@@ -13,7 +13,7 @@ struct ExtendRequest {
 
 #[derive(Deserialize)]
 struct ExtendResponse {
-    pub result: bool,
+    // pub result: bool,
     pub email: Option<String>,
 }
 

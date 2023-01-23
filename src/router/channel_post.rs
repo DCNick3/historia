@@ -1,4 +1,5 @@
 use crate::attendance::Attendance;
+use crate::config::BotChannel;
 use crate::moodle::Moodle;
 use crate::router::{MyStorage, State};
 use crate::{config, MyBot};
@@ -38,6 +39,7 @@ fn format_failure_message(attendance: &Attendance, reason: &str) -> String {
 async fn handle_user(
     bot: &MyBot,
     moodle: &Moodle,
+    activity_id: u32,
     chat_id: ChatId,
     state: State,
     attendance: &Attendance,
@@ -55,29 +57,31 @@ async fn handle_user(
         State::ReceiveSession => {
             // don't interrupt the user
         }
-        State::Registered(user) => match moodle.mark_attendance(&user, attendance).await {
-            Ok(_) => {
-                bot.send_message(
-                    chat_id,
-                    format!(
-                        "Marked your attendance for {}",
-                        bold(&format!("{:02}.{:02}", attendance.day, attendance.month))
-                    ),
-                )
-                .await?;
+        State::Registered(user) => {
+            match moodle.mark_attendance(activity_id, &user, attendance).await {
+                Ok(_) => {
+                    bot.send_message(
+                        chat_id,
+                        format!(
+                            "Marked your attendance for {}",
+                            bold(&format!("{:02}.{:02}", attendance.day, attendance.month))
+                        ),
+                    )
+                    .await?;
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to mark attendance for {}/{}: {:?}",
+                        chat_id, user, e
+                    );
+                    bot.send_message(
+                        chat_id,
+                        format_failure_message(attendance, "of some nasty error"),
+                    )
+                    .await?;
+                }
             }
-            Err(e) => {
-                error!(
-                    "Failed to mark attendance for {}/{}: {:?}",
-                    chat_id, user, e
-                );
-                bot.send_message(
-                    chat_id,
-                    format_failure_message(attendance, "of some nasty error"),
-                )
-                .await?;
-            }
-        },
+        }
     }
 
     Ok(())
@@ -90,35 +94,40 @@ pub async fn channel_post(
     post: Message,
     storage: Arc<MyStorage>,
 ) -> Result<()> {
-    if !config.update_chat_list.contains(&post.chat.id) {
+    let Some(&BotChannel {
+        activity_id,
+        ..
+    }) = config.update_channels.iter().find(|v| v.id == post.chat.id)
+    else {
         debug!("Received channel post from unknown chat: {:?}", post.chat);
         return Ok(());
-    }
+    };
 
-    if let Some(text) = post.text() {
-        if let Some(attendance) = parse_attendance(text) {
-            info!("Received password: {}", attendance);
-
-            let dialogues = storage.get_all_dialogues::<State>().await?;
-            info!("Found {} dialogues", dialogues.len());
-
-            for (chat_id, state) in dialogues {
-                if !chat_id.is_user() {
-                    continue;
-                }
-
-                if let Err(e) = handle_user(&bot, &moodle, chat_id, state, &attendance).await {
-                    error!("Failed to handle user {}: {:?}", chat_id, e);
-                }
-            }
-        } else {
-            debug!(
-                "Received channel post from {:?} with unknown text: {:?}",
-                post.chat, text
-            );
-        }
-    } else {
+    let Some(text) = post.text() else {
         debug!("Ignoring channel post without text: {:?}", post.id);
+        return Ok(());
+    };
+    let Some(attendance) = parse_attendance(text) else {
+        debug!(
+            "Received channel post from {:?} with unknown text: {:?}",
+            post.chat, text
+        );
+        return Ok(());
+    };
+
+    info!("Received password: {}", attendance);
+
+    let dialogues = storage.get_all_dialogues::<State>().await?;
+    info!("Found {} dialogues", dialogues.len());
+
+    for (chat_id, state) in dialogues {
+        if !chat_id.is_user() {
+            continue;
+        }
+
+        if let Err(e) = handle_user(&bot, &moodle, activity_id, chat_id, state, &attendance).await {
+            error!("Failed to handle user {}: {:?}", chat_id, e);
+        }
     }
 
     Ok(())

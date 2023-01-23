@@ -11,6 +11,8 @@ moodle_extender:
 updater:
   interval: "1h"
 bot:
-  update_chat_list:
-    - -1001842503691 # history passwords
-    - -1001727873081 # history test
+  update_channels:
+    - id: -1001842503691 # history passwords
+      activity_id: 87610 # prod
+    - id: -1001727873081 # history test
+      activity_id: 62129
