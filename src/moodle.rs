@@ -1,7 +1,7 @@
 use crate::attendance::Attendance;
 use crate::config;
 use crate::moodle_extender::MoodleExtender;
-use crate::time_trace::TimeTrace;
+use crate::reqwest_span_backend::MoodleSpanBackend;
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{Datelike, NaiveDate};
 use email_address::EmailAddress;
@@ -12,14 +12,14 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::header::{HeaderValue, COOKIE, LOCATION};
 use reqwest::redirect::Policy;
-use reqwest::Url;
 use reqwest_tracing::TracingMiddleware;
 use scraper::{ElementRef, Html, Selector};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::num::NonZeroU32;
 use std::time::Duration;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, trace};
+use url::Url;
 
 static EMAIL_EXTRACT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r#"<dt>(?:Email address|Адрес электронной почты)</dt><dd><a href="([^"]+)">"#)
@@ -28,10 +28,20 @@ static EMAIL_EXTRACT_REGEX: Lazy<Regex> = Lazy::new(|| {
 static SESSION_EXTRACT_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#""sesskey":"([^"]+)""#).unwrap());
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct MoodleUser {
     session: String,
     email: String,
+}
+
+impl Debug for MoodleUser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MoodleUser")
+            // do not include session in debug output (it's a secret)
+            // .field("session", &self.session)
+            .field("email", &self.email)
+            .finish()
+    }
 }
 
 impl Display for MoodleUser {
@@ -90,14 +100,14 @@ impl Moodle {
                     .redirect(Policy::none())
                     .build()?,
             )
-            .with(TracingMiddleware::<TimeTrace>::new())
+            .with(TracingMiddleware::<MoodleSpanBackend>::new())
             .build(),
             base_url: config.base_url.clone(),
             rate_limiter,
         })
     }
 
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err, ret)]
     pub async fn make_user(&self, session: String) -> Result<Option<MoodleUser>> {
         let email = self
             .extender
@@ -108,7 +118,7 @@ impl Moodle {
         Ok(email.map(|email| MoodleUser { session, email }))
     }
 
-    #[instrument(skip_all, fields(user = %user.email))]
+    #[instrument(skip_all, err, ret, fields(moodle.user = %user))]
     pub async fn check_user(&self, user: &MoodleUser) -> Result<SessionProbeResult> {
         self.rate_limiter.until_ready().await;
 
@@ -168,7 +178,7 @@ impl Moodle {
         })
     }
 
-    #[instrument(skip_all, fields(%activity_id, user = %user.email))]
+    #[instrument(skip_all, err, fields(moodle.activity_id = %activity_id, moodle.user = %user))]
     pub async fn get_attendance_sessions(
         &self,
         activity_id: u32,
@@ -211,10 +221,11 @@ impl Moodle {
 
         let mut result = Vec::new();
         for session in table.children() {
-            debug!("Session node: {:?}", session.value());
-
             // skip non-element nodes
             let Some(session) = ElementRef::wrap(session) else { continue };
+
+            trace!("Session element: {:?}", session.value());
+
             let date = session
                 .select(&DATE_SELECTOR)
                 .next()
@@ -257,7 +268,7 @@ impl Moodle {
         Ok(result)
     }
 
-    #[instrument(skip_all, fields(%session_id, %password, user = %user.email))]
+    #[instrument(skip_all, err, fields(moodle.session_id = %session_id, moodle.session_password = %password, moodle.user = %user))]
     pub async fn mark_attendance_session(
         &self,
         user: &MoodleUser,
@@ -326,19 +337,17 @@ impl Moodle {
     }
 
     pub fn make_attendance_url(&self, activity_id: u32) -> Result<Url> {
-        Ok(self
-            .base_url
+        self.base_url
             .join(&format!("/mod/attendance/view.php?id={}", activity_id))
-            .context("Making attendance URL")?)
+            .context("Making attendance URL")
     }
 
     pub fn make_session_url(&self, session_id: u32) -> Result<Url> {
-        Ok(self
-            .base_url
+        self.base_url
             .join(&format!(
                 "/mod/attendance/attendance.php?sessid={}",
                 session_id
             ))
-            .context("Making session URL")?)
+            .context("Making session URL")
     }
 }

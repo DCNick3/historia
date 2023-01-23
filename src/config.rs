@@ -1,10 +1,10 @@
 use anyhow::Context;
 use camino::Utf8PathBuf;
-use reqwest::Url;
 use serde::{de, Deserialize, Deserializer};
 use std::str::FromStr;
 use std::time::Duration;
 use teloxide::types::ChatId;
+use url::Url;
 
 fn deserialize_path<'de, D>(de: D) -> Result<Utf8PathBuf, D::Error>
 where

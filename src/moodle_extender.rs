@@ -1,10 +1,10 @@
 use crate::config;
-use crate::time_trace::TimeTrace;
+use crate::reqwest_span_backend::MoodleExtenderSpanBackend;
 use anyhow::Result;
-use reqwest::Url;
 use reqwest_tracing::TracingMiddleware;
 use serde::{Deserialize, Serialize};
-use tracing::trace;
+use tracing::{instrument, trace};
+use url::Url;
 
 #[derive(Serialize)]
 struct ExtendRequest {
@@ -26,12 +26,13 @@ impl MoodleExtender {
     pub async fn new(config: &config::MoodleExtender) -> Result<Self> {
         Ok(MoodleExtender {
             reqwest: reqwest_middleware::ClientBuilder::new(reqwest::ClientBuilder::new().build()?)
-                .with(TracingMiddleware::<TimeTrace>::new())
+                .with(TracingMiddleware::<MoodleExtenderSpanBackend>::new())
                 .build(),
             base_url: config.base_url.clone(),
         })
     }
 
+    #[instrument(skip_all, err, ret)]
     pub async fn extend_session(&self, session: &str) -> Result<Option<String>> {
         trace!("Extending session {}...", session);
 

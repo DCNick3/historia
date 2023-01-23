@@ -6,11 +6,11 @@ use crate::{config, MyBot};
 use anyhow::Result;
 use once_cell::sync::Lazy;
 use regex::Regex;
-use reqwest::Url;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::utils::html::{bold, code_inline, link};
 use tracing::{debug, error, info, instrument};
+use url::Url;
 
 static PASSWORD_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"^Attendance password for (?P<day>\d+)\.(?P<month>\d+): (?P<password>.*)$").unwrap()
@@ -63,7 +63,7 @@ fn format_failure_message(
     )
 }
 
-#[instrument(skip_all, fields(%chat_id))]
+#[instrument(skip_all, err, fields(historia.state = ?state, rg.chat_id = %chat_id))]
 async fn handle_user(
     bot: &MyBot,
     moodle: &Moodle,
@@ -181,6 +181,15 @@ async fn handle_user(
     Ok(())
 }
 
+#[instrument(skip_all, err, fields(
+        tg.chat_id = %post.chat.id,
+        tg.message_id = %post.id,
+        tg.message = %post.text().unwrap_or("<no text>"),
+        historia.activity_id = tracing::field::Empty,
+        historia.attendance.date = tracing::field::Empty,
+        historia.attendance.password = tracing::field::Empty,
+    )
+)]
 pub async fn channel_post(
     bot: MyBot,
     config: Arc<config::Bot>,
@@ -188,6 +197,8 @@ pub async fn channel_post(
     post: Message,
     storage: Arc<MyStorage>,
 ) -> Result<()> {
+    let span = tracing::Span::current();
+
     let Some(&BotChannel {
         activity_id,
         ..
@@ -196,6 +207,8 @@ pub async fn channel_post(
         debug!("Received channel post from unknown chat: {:?}", post.chat);
         return Ok(());
     };
+
+    span.record("historia.activity_id", &activity_id);
 
     let Some(text) = post.text() else {
         debug!("Ignoring channel post without text: {:?}", post.id);
@@ -208,6 +221,12 @@ pub async fn channel_post(
         );
         return Ok(());
     };
+
+    span.record(
+        "historia.attendance.date",
+        &format!("{:02}.{:02}", attendance.day, attendance.month),
+    );
+    span.record("historia.attendance.password", &attendance.password);
 
     info!("Received password: {}", attendance);
 

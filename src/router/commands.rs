@@ -6,18 +6,20 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::utils::command::BotCommands;
 use teloxide::utils::html::{bold, escape};
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 
 use super::Command;
 
+#[instrument(skip_all, fields(tg.chat_id = %message.chat.id, tg.message_id = %message.id, tg.message = %message.text().unwrap_or("<no text>")))]
 pub async fn help(bot: MyBot, message: Message) -> Result<()> {
-    info!("Received help command from {:?}", message.chat);
+    info!("Received help command from {}", message.chat.id);
     bot.send_message(message.chat.id, Command::descriptions().to_string())
         .await?;
     Ok(())
 }
+#[instrument(skip_all, fields(tg.chat_id = %message.chat.id, tg.message_id = %message.id, tg.message = %message.text().unwrap_or("<no text>")))]
 pub async fn start(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result<()> {
-    info!("Received start command from {:?}", message.chat);
+    info!("Received start command from {}", message.chat.id);
 
     bot.send_message(
         message.chat.id,
@@ -28,8 +30,9 @@ pub async fn start(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result
 
     Ok(())
 }
+#[instrument(skip_all, fields(tg.chat_id = %message.chat.id, tg.message_id = %message.id, tg.message = %message.text().unwrap_or("<no text>")))]
 pub async fn reset(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result<()> {
-    info!("Received reset command from {:?}", message.chat);
+    info!("Received reset command from {}", message.chat.id);
     bot.send_message(
         message.chat.id,
         "Resetting the bot, you are no longer registered",
@@ -39,13 +42,14 @@ pub async fn reset(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result
     Ok(())
 }
 
+#[instrument(skip_all, fields(tg.chat_id = %message.chat.id, tg.message_id = %message.id, tg.message = %message.text().unwrap_or("<no text>")))]
 pub async fn receive_cookie(
     bot: MyBot,
     moodle: Arc<Moodle>,
     dialogue: MyDialogue,
     message: Message,
 ) -> Result<()> {
-    info!("Received cookie from {:?}", message.chat);
+    info!("Received cookie from {}", message.chat.id);
     match message.text().map(ToOwned::to_owned) {
         Some(session) => {
             let message = bot
@@ -96,6 +100,7 @@ pub async fn receive_cookie(
 
     Ok(())
 }
+#[instrument(skip_all, fields(tg.chat_id = %message.chat.id, tg.message_id = %message.id, tg.message = %message.text().unwrap_or("<no text>")))]
 pub async fn invalid_state(bot: MyBot, message: Message) -> Result<()> {
     bot.send_message(
         message.chat.id,

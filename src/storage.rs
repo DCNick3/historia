@@ -11,7 +11,7 @@ use std::{
 use teloxide::dispatching::dialogue::{Serializer, Storage};
 use teloxide::types::ChatId;
 use thiserror::Error;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// A persistent dialogue storage based on [SQLite](https://www.sqlite.org/).
 pub struct SqliteStorage<S> {
@@ -66,12 +66,12 @@ where
 {
     type Error = SqliteStorageError<<S as Serializer<D>>::Error>;
 
+    #[instrument(skip(self))]
     /// Returns [`sqlx::Error::RowNotFound`] if a dialogue does not exist.
     fn remove_dialogue(
         self: Arc<Self>,
         ChatId(chat_id): ChatId,
     ) -> BoxFuture<'static, Result<(), Self::Error>> {
-        trace!("Removing dialogue #{}", chat_id);
         Box::pin(async move {
             let deleted_rows_count =
                 sqlx::query("DELETE FROM teloxide_dialogues WHERE chat_id = ?")
@@ -88,13 +88,13 @@ where
         })
     }
 
+    #[instrument(skip(self))]
     fn update_dialogue(
         self: Arc<Self>,
         ChatId(chat_id): ChatId,
         dialogue: D,
     ) -> BoxFuture<'static, Result<(), Self::Error>> {
         Box::pin(async move {
-            let to = format!("{dialogue:#?}");
             let d = self
                 .serializer
                 .serialize(&dialogue)
@@ -114,11 +114,11 @@ where
                     .bind(d),
                 )
                 .await?;
-            trace!("Updated a dialogue #{}: {:#?}", chat_id, to);
             Ok(())
         })
     }
 
+    #[instrument(skip(self))]
     fn get_dialogue(
         self: Arc<Self>,
         chat_id: ChatId,
@@ -138,6 +138,7 @@ where
 }
 
 impl<S> SqliteStorage<S> {
+    #[instrument(skip(self))]
     pub async fn get_all_dialogues<D>(
         &self,
     ) -> Result<HashMap<ChatId, D>, SqliteStorageError<<S as Serializer<D>>::Error>>

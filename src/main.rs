@@ -1,39 +1,43 @@
 mod attendance;
 mod config;
+mod init_tracing;
 mod moodle;
 mod moodle_extender;
+mod reqwest_span_backend;
 mod router;
 mod storage;
-mod time_trace;
+mod teloxide_tracing;
 
+use crate::moodle::Moodle;
+use crate::moodle_extender::MoodleExtender;
 use anyhow::{Context, Result};
 use dptree::deps;
+use router::{schema, MyStorage};
 use std::sync::Arc;
 use std::time::Duration;
-use teloxide::adaptors::{DefaultParseMode, Throttle, Trace};
+use teloxide::adaptors::{DefaultParseMode, Throttle};
 use teloxide::dispatching::dialogue::serializer::Json;
 use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use teloxide::update_listeners::Polling;
+use teloxide_tracing::Trace;
 use tracing::info;
-
-use crate::moodle::Moodle;
-use crate::moodle_extender::MoodleExtender;
-use router::{schema, MyStorage};
 
 type MyBot = Trace<Throttle<DefaultParseMode<Bot>>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    init_tracing::init_tracing().context("Setting up the opentelemetry exporter")?;
     info!("Starting historia bot...");
 
     let config = config::Config::read()?;
 
-    let bot: MyBot = Bot::from_env()
-        .parse_mode(ParseMode::Html)
-        .throttle(Default::default())
-        .trace(teloxide::adaptors::trace::Settings::all());
+    let bot: MyBot = Trace::new(
+        Bot::from_env()
+            .parse_mode(ParseMode::Html)
+            .throttle(Default::default()),
+        teloxide_tracing::Settings::all(),
+    );
 
     let listener = Polling::builder(bot.clone())
         .timeout(Duration::from_secs(10))
