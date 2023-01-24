@@ -133,7 +133,7 @@ async fn handle_user(
                     chat_id,
                     format_failure_message(
                         attendance,
-                        "I failed to find matching attendance sessions (or you are already marked)",
+                        "I failed to find matching attendance session (or you are already marked)",
                         Solutions::ManuallyMarkAt,
                         &moodle.make_attendance_url(activity_id)?,
                     ),
@@ -166,7 +166,7 @@ async fn handle_user(
                             chat_id,
                             format_failure_message(
                                 attendance,
-                                "of some nasty error",
+                                "of some nasty error (contact the developer pls)",
                                 Solutions::ManuallyMarkAt,
                                 &moodle.make_session_url(session.id)?,
                             ),

@@ -66,7 +66,12 @@ async fn main() -> Result<()> {
     );
 
     Dispatcher::builder(bot, schema())
-        .dependencies(deps![Arc::new(config.bot), storage, moodle])
+        .dependencies(deps![
+            Arc::new(config.bot),
+            Arc::new(config.moodle),
+            storage,
+            moodle
+        ])
         .enable_ctrlc_handler()
         .build()
         .dispatch_with_listener(

@@ -1,11 +1,11 @@
 use crate::moodle::Moodle;
 use crate::router::{MyDialogue, State};
-use crate::MyBot;
+use crate::{config, MyBot};
 use anyhow::Result;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::utils::command::BotCommands;
-use teloxide::utils::html::{bold, escape};
+use teloxide::utils::html::{bold, code_inline, escape, link};
 use tracing::{info, instrument, warn};
 
 use super::Command;
@@ -18,12 +18,28 @@ pub async fn help(bot: MyBot, message: Message) -> Result<()> {
     Ok(())
 }
 #[instrument(skip_all, fields(tg.chat_id = %message.chat.id, tg.message_id = %message.id, tg.message = %message.text().unwrap_or("<no text>")))]
-pub async fn start(bot: MyBot, dialogue: MyDialogue, message: Message) -> Result<()> {
+pub async fn start(
+    bot: MyBot,
+    moodle_config: Arc<config::Moodle>,
+    dialogue: MyDialogue,
+    message: Message,
+) -> Result<()> {
     info!("Received start command from {}", message.chat.id);
 
     bot.send_message(
         message.chat.id,
-        "Let's start! Give me your moodle session\n[TODO: write instructions]",
+        format!("Let's start! Give me your moodle session\n\n\
+        To get it, you should navigate to the moodle page & log in:\n\n{}\n\nThen, open the developer tools (F12) and print cookies by entering {} in the console.\n\n\
+        The output should look like this:\n\n{}\n\nOr like this:\n\n{}\n\n\
+        Copy the value of the {} cookie (everything after {}, for example {}) and send it to me.",
+            link(moodle_config.base_url.as_str(), moodle_config.base_url.as_str()),
+            code_inline("document.cookie"),
+            code_inline("\"MoodleSession=1234567890\""),
+            code_inline("\"MoodleSession=1234567890; SomeOtherCookie=lol\""),
+            bold("MoodleSession"),
+            code_inline("MoodleSession="),
+            bold("1234567890"),
+        ),
     )
     .await?;
     dialogue.update(State::ReceiveSession).await?;
