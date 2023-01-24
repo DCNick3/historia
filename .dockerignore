@@ -1,0 +1,7 @@
+.git
+.idea
+target
+Dockerfile
+deployment
+token.txt
+data

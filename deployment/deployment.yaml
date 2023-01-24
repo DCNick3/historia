@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: historia
+  namespace: default
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0 # we use a PVC for the DB, so we can't keep old revisions
+  selector:
+    matchLabels:
+      app: historia
+  template:
+    metadata:
+      labels:
+        app: historia
+      annotations:
+        instrumentation.opentelemetry.io/inject-sdk: "true"
+    spec:
+      containers:
+        - name: historia
+          image: ghcr.io/dcnick3/historia
+          volumeMounts:
+            - mountPath: /data
+              name: sessions-storage
+            - name: secrets
+              mountPath: "/secrets"
+              readOnly: true
+          env:
+            - name: RUST_LOG
+              value: "historia=trace,teloxide=trace,sqlx=warn,info"
+            - name: TELOXIDE_TOKEN_FILE
+              value: "/secrets/token.txt"
+      volumes:
+        - name: sessions-storage
+          persistentVolumeClaim:
+            claimName: historia-pvc
+        - name: secrets
+          secret:
+            secretName: historia-secrets
+            items:
+              - key: token
+                path: token.txt

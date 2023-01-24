@@ -66,7 +66,7 @@ where
 {
     type Error = SqliteStorageError<<S as Serializer<D>>::Error>;
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, chat_id), err, fields(tg.chat_id = %chat_id))]
     /// Returns [`sqlx::Error::RowNotFound`] if a dialogue does not exist.
     fn remove_dialogue(
         self: Arc<Self>,
@@ -88,7 +88,7 @@ where
         })
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, chat_id), err, fields(tg.chat_id = %chat_id))]
     fn update_dialogue(
         self: Arc<Self>,
         ChatId(chat_id): ChatId,
@@ -118,7 +118,7 @@ where
         })
     }
 
-    #[instrument(skip(self))]
+    #[instrument(skip(self, chat_id), err, fields(tg.chat_id = %chat_id))]
     fn get_dialogue(
         self: Arc<Self>,
         chat_id: ChatId,
@@ -138,7 +138,7 @@ where
 }
 
 impl<S> SqliteStorage<S> {
-    #[instrument(skip(self))]
+    #[instrument(skip(self), err)]
     pub async fn get_all_dialogues<D>(
         &self,
     ) -> Result<HashMap<ChatId, D>, SqliteStorageError<<S as Serializer<D>>::Error>>

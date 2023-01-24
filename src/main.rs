@@ -25,6 +25,14 @@ use tracing::info;
 
 type MyBot = Trace<Throttle<DefaultParseMode<Bot>>>;
 
+fn make_bot() -> Result<Bot> {
+    let token_file = std::env::var("TELOXIDE_TOKEN_FILE")
+        .context("TELOXIDE_TOKEN_FILE is not set (should contain path to file with bot token)")?;
+    let token = std::fs::read_to_string(token_file).context("Reading token file")?;
+
+    Ok(Bot::new(token.trim()))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing::init_tracing().context("Setting up the opentelemetry exporter")?;
@@ -33,7 +41,7 @@ async fn main() -> Result<()> {
     let config = config::Config::read()?;
 
     let bot: MyBot = Trace::new(
-        Bot::from_env()
+        make_bot()?
             .parse_mode(ParseMode::Html)
             .throttle(Default::default()),
         teloxide_tracing::Settings::all(),

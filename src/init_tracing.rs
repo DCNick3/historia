@@ -6,6 +6,7 @@ use opentelemetry::sdk::resource::{EnvResourceDetector, SdkProvidedResourceDetec
 use opentelemetry::sdk::{trace as sdktrace, Resource};
 use opentelemetry_otlp::{HasExportConfig, WithExportConfig};
 use std::time::Duration;
+use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::Registry;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -53,7 +54,8 @@ pub fn init_tracing() -> Result<()> {
         )
         .with(
             tracing_subscriber::fmt::Layer::new()
-                .event_format(tracing_subscriber::fmt::format::Format::default().pretty()),
+                .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+                .event_format(tracing_subscriber::fmt::format::Format::default().compact()),
         )
         .with(tracing_opentelemetry::layer().with_tracer(tracer))
         .init();

@@ -55,7 +55,6 @@ pub struct Moodle {
     pub rpm: u32,
     pub max_burst: u32,
     pub user_agent: String,
-    pub activity_id: u32,
 }
 
 #[derive(Debug, Deserialize)]

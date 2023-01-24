@@ -6,12 +6,13 @@ moodle:
   max_burst: 120
   user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
 moodle_extender:
-  base_url: "https://moodle-session-ext.dcnick3.me/"
+  # use internal k8s networking
+  base_url: "http://moodle-session-ext.default.svc.cluster.local/"
 updater:
   interval: "1h"
 bot:
   update_channels:
     - id: -1001842503691 # history passwords
       activity_id: 87610 # prod
-    - id: -1001727873081 # history test
+    - id: -1001872250726 # history test prod
       activity_id: 62129 # TC

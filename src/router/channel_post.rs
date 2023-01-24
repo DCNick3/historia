@@ -63,7 +63,7 @@ fn format_failure_message(
     )
 }
 
-#[instrument(skip_all, err, fields(historia.state = ?state, rg.chat_id = %chat_id))]
+#[instrument(skip_all, err, fields(historia.state = ?state, tg.chat_id = %chat_id))]
 async fn handle_user(
     bot: &MyBot,
     moodle: &Moodle,
