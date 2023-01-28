@@ -268,6 +268,60 @@ impl Moodle {
         Ok(result)
     }
 
+    #[instrument(skip_all, err, fields(moodle.session_id = %session_id, moodle.user = %user))]
+    pub async fn get_session_statuses(
+        &self,
+        user: &MoodleUser,
+        session_id: u32,
+    ) -> Result<Vec<(u32, String)>> {
+        self.rate_limiter.until_ready().await;
+
+        let url = self.base_url.join(&format!(
+            "/mod/attendance/attendance.php?sessid={}",
+            session_id
+        ))?;
+
+        let resp = self
+            .reqwest
+            .get(url)
+            .header(
+                COOKIE,
+                HeaderValue::from_str(&format!("MoodleSession={}", user.session))?,
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+        let resp = Html::parse_document(&resp.text().await?);
+
+        static LABELS_SELECTOR: Lazy<Selector> =
+            Lazy::new(|| Selector::parse("#fgroup_id_statusarray label").unwrap());
+        static INPUT_SELECTOR: Lazy<Selector> = Lazy::new(|| Selector::parse("input").unwrap());
+
+        let mut result = Vec::new();
+
+        for label in resp.select(&LABELS_SELECTOR) {
+            let name = label
+                .text()
+                .find(|v| !v.trim().is_empty())
+                .context("Getting label text")?
+                .trim();
+
+            let id = label
+                .select(&INPUT_SELECTOR)
+                .next()
+                .context("Getting input")?
+                .value()
+                .attr("value")
+                .context("Getting input value")?
+                .parse::<u32>()
+                .context("Parsing input value")?;
+
+            result.push((id, name.to_string()));
+        }
+
+        Ok(result)
+    }
+
     #[instrument(skip_all, err, fields(moodle.session_id = %session_id, moodle.session_password = %password, moodle.user = %user))]
     pub async fn mark_attendance_session(
         &self,
@@ -276,6 +330,22 @@ impl Moodle {
         session_id: u32,
         password: &str,
     ) -> Result<()> {
+        let statuses = self
+            .get_session_statuses(user, session_id)
+            .await
+            .context("Getting attendance statuses")?;
+
+        debug!("Got statuses: {:?}", statuses);
+
+        // select one with name "Present"
+        let status_id = statuses
+            .into_iter()
+            .find(|(_, name)| name == "Present")
+            .map(|(id, _)| id)
+            .context("Finding status id")?;
+
+        debug!("Selected status: {}", status_id);
+
         self.rate_limiter.until_ready().await;
 
         let url = self.base_url.join("/mod/attendance/attendance.php")?;
@@ -306,22 +376,26 @@ impl Moodle {
                 mform_isexpanded_id_session: 1,
                 studentpassword: password,
                 submitbutton: "Save changes",
-                status: 1371, // magic number
+                status: status_id, // magic number
             })
             .send()
             .await?
             .error_for_status()?;
 
-        if !resp.status().is_redirection() {
+        let status = resp.status();
+        let location = resp.headers().get(LOCATION).cloned();
+
+        let body = resp.text().await?;
+
+        if !status.is_redirection() {
             bail!(
                 "Unexpected response status: {} (expected a redirect). Invalid status?",
-                resp.status()
+                status
             );
         }
 
-        let location = resp
-            .headers()
-            .get(LOCATION)
+        let location = location
+            .as_ref()
             .ok_or_else(|| anyhow!("Missing header"))
             .and_then(|v| v.to_str().context("Header to str"))
             .and_then(|v| Url::parse(v).context("Parse as Url"))?;

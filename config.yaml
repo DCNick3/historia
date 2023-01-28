@@ -12,4 +12,5 @@ updater:
 bot:
   update_channels:
     - id: -1001727873081 # history test debug
-      activity_id: 62129 # TC
+#      activity_id: 62129 # TC
+      activity_id: 87610 # prod
