@@ -42,7 +42,7 @@ pub enum Command {
     Help,
     #[command(description = "start the registration procedure.")]
     Start,
-    #[command(description = "start the registration procedure.")]
+    #[command(description = "check your token status.")]
     Status,
     #[command(description = "off")]
     SuperStatus,
