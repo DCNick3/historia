@@ -72,6 +72,7 @@ pub struct Updater {
 #[derive(Debug, Deserialize)]
 pub struct Bot {
     pub update_channels: Vec<BotChannel>,
+    pub super_users: Vec<ChatId>,
 }
 
 #[derive(Debug, Deserialize)]

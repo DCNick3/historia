@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
             .context("Opening moodle accessor")?,
     );
 
-    Dispatcher::builder(bot, schema())
+    Dispatcher::builder(bot, schema(&config.bot))
         .dependencies(deps![
             Arc::new(config.bot),
             Arc::new(config.moodle),

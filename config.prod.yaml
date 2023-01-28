@@ -17,3 +17,5 @@ bot:
     - id: -1001872250726 # history test prod
 #      activity_id: 62129 # TC
       activity_id: 87610 # prod
+  super_users:
+    - 379529027

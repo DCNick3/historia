@@ -385,7 +385,7 @@ impl Moodle {
         let status = resp.status();
         let location = resp.headers().get(LOCATION).cloned();
 
-        let body = resp.text().await?;
+        let _body = resp.text().await?;
 
         if !status.is_redirection() {
             bail!(
