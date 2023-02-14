@@ -2,6 +2,7 @@ use crate::moodle::{Moodle, SessionProbeResult};
 use crate::router::{MyDialogue, MyStorage, State};
 use crate::{config, MyBot};
 use anyhow::{Context, Result};
+use itertools::Itertools;
 use std::borrow::Cow;
 use std::sync::Arc;
 use teloxide::prelude::*;
@@ -103,8 +104,12 @@ pub async fn super_status(
 
     let mut status = String::new();
 
-    let statuses = storage.get_all_dialogues::<State>().await?;
-    for (&chat, state) in statuses.iter() {
+    for (chat, state) in storage
+        .get_all_dialogues::<State>()
+        .await?
+        .into_iter()
+        .sorted_by_key(|(chat, _)| *chat)
+    {
         if !chat.is_user() {
             continue;
         }
@@ -113,7 +118,7 @@ pub async fn super_status(
             State::Start => "[unregistered]".into(),
             State::ReceiveSession => "[unregistered]".into(),
             State::Registered(user) => {
-                let result = moodle.check_user(user).await;
+                let result = moodle.check_user(&user).await;
 
                 let result = match result {
                     Ok(SessionProbeResult::Valid { .. }) => "VALID",
