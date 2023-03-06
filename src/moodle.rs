@@ -412,7 +412,10 @@ impl Moodle {
 
     pub fn make_attendance_url(&self, activity_id: u32) -> Result<Url> {
         self.base_url
-            .join(&format!("/mod/attendance/view.php?id={}", activity_id))
+            .join(&format!(
+                "/mod/attendance/view.php?id={}&view=5",
+                activity_id
+            ))
             .context("Making attendance URL")
     }
 
